@@ -1,0 +1,23 @@
+[project]
+name = "medremind"
+version = "0.1.0"
+description = "A Telegram bot that sends medication reminders to a group chat"
+readme = "README.md"
+authors = [
+    { name = "Maheshkumar", email = "67100964+Maheshkumar-novice@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot>=20.0,<21.0",
+    "apscheduler>=3.10.0,<4.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "pytz",
+]
+
+[project.scripts]
+medremind = "medremind.main:cli"
+
+[build-system]
+requires = ["uv_build>=0.9.28,<0.10.0"]
+build-backend = "uv_build"
