@@ -189,6 +189,13 @@ async def time_slot_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return TIME_SLOT
 
     times = context.user_data["times"]
+
+    if text in times:
+        await update.message.reply_text(
+            f"{text} is already added. Pick a different time."
+        )
+        return TIME_SLOT
+
     times.append(text)
 
     num_times = context.user_data["num_times"]
