@@ -173,6 +173,11 @@ async def new_value_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text input for name or dose changes."""
     text = update.message.text.strip()
     field = context.user_data["edit_field"]
+
+    if field not in ("name", "dose"):
+        await update.message.reply_text("Please use the buttons above.")
+        return NEW_VALUE
+
     med_id = context.user_data["edit_med_id"]
 
     db = get_db()

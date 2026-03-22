@@ -12,7 +12,6 @@ from telegram.ext import (
 from medremind.constants import chat_filter
 from medremind.crud import (
     delete_medication,
-    get_medication_with_schedules,
     get_medications_for_person,
     get_persons,
 )
@@ -126,9 +125,7 @@ async def confirm_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     med_id = context.user_data["delete_med_id"]
     db = get_db()
     try:
-        med = get_medication_with_schedules(db, med_id)
-        if med:
-            delete_medication(db, med_id)
+        if delete_medication(db, med_id):
             refresh_jobs()
             await query.edit_message_text(
                 f"🗑 Deleted: {context.user_data['delete_med_name']}"
