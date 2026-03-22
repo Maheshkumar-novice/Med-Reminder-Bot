@@ -13,6 +13,7 @@ from telegram.ext import (
 
 from medremind.config import settings
 from medremind.constants import FOOD_RULE_LABELS, chat_filter
+
 from medremind.conversation.add_med import add_conversation
 from medremind.conversation.add_person import addperson_conversation
 from medremind.conversation.delete_med import delete_conversation
@@ -57,7 +58,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             lines.append("")
 
-        await update.message.reply_text("\n".join(lines).strip())
+        lines.append(f"🕐 Timezone: {settings.timezone}")
+        await update.message.reply_text("\n".join(lines))
     finally:
         db.close()
 

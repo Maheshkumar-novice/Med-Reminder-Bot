@@ -12,12 +12,13 @@ from telegram.ext import (
     filters,
 )
 
+from medremind.config import settings
 from medremind.constants import FOOD_RULE_LABELS, chat_filter
 from medremind.crud import add_medication, get_persons
 from medremind.database import get_db
 from medremind.scheduler import add_jobs_for_medication
 
-PERSON, MED_NAME, DOSE, FOOD_RULE, NUM_TIMES, TIME_SLOT = range(6)
+PERSON, MED_NAME, DOSE, FOOD_RULE, NUM_TIMES, CONFIRM_TIMES, TIME_SLOT = range(7)
 
 FOOD_RULE_OPTIONS = {
     "before_food": "Before food",
@@ -26,6 +27,17 @@ FOOD_RULE_OPTIONS = {
     "empty_stomach": "Empty stomach",
     "any": "Any time",
 }
+
+SUGGESTED_TIMES = {
+    1: ["08:00"],
+    2: ["08:00", "20:00"],
+    3: ["08:00", "14:00", "20:00"],
+    4: ["08:00", "12:00", "16:00", "20:00"],
+}
+
+
+def _format_times(times: list[str]) -> str:
+    return ", ".join(times)
 
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -103,9 +115,42 @@ async def num_times_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     n = int(query.data.split("_")[1])
     context.user_data["num_times"] = n
-    context.user_data["times"] = []
 
-    await query.edit_message_text(f"{n}x per day\n\nTime for dose 1? (HH:MM, 24hr format)")
+    suggested = SUGGESTED_TIMES[n]
+    context.user_data["suggested_times"] = suggested
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Accept", callback_data="times_accept"),
+            InlineKeyboardButton("✏️ Edit", callback_data="times_edit"),
+        ]
+    ]
+    await query.edit_message_text(
+        f"{n}x per day\n\n"
+        f"Suggested times: {_format_times(suggested)}\n"
+        f"(Timezone: {settings.timezone})",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+    return CONFIRM_TIMES
+
+
+async def times_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    action = query.data.split("_")[1]
+
+    if action == "accept":
+        times = context.user_data["suggested_times"]
+        await query.edit_message_text(f"Times: {_format_times(times)}")
+        return await _save_medication(query, context, times)
+
+    # Edit — start manual time entry
+    context.user_data["times"] = []
+    await query.edit_message_text(
+        f"Time for dose 1? (HH:MM, 24hr format)\n"
+        f"(Timezone: {settings.timezone})"
+    )
     return TIME_SLOT
 
 
@@ -128,6 +173,11 @@ async def time_slot_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Time for dose {slot_num}?")
         return TIME_SLOT
 
+    return await _save_medication(update, context, times)
+
+
+async def _save_medication(source, context, times):
+    """Save medication to DB and schedule jobs. Source is query or update."""
     db = get_db()
     try:
         med = add_medication(
@@ -141,15 +191,22 @@ async def time_slot_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
         add_jobs_for_medication(med.id, med.schedules)
 
         food_label = FOOD_RULE_LABELS.get(med.food_rule, med.food_rule)
-        times_str = ", ".join(times)
+        times_str = _format_times(times)
         person_name = context.user_data["person_name"]
 
-        await update.message.reply_text(
+        message = (
             f"✅ Added successfully!\n\n"
             f"💊 {person_name} — {med.name} {med.dose}\n"
-            f"{food_label} · {times_str}\n\n"
+            f"{food_label} · {times_str}\n"
+            f"Timezone: {settings.timezone}\n\n"
             f"Reminders are active."
         )
+
+        # source can be a CallbackQuery or an Update
+        if hasattr(source, "message"):
+            await source.message.reply_text(message)
+        else:
+            await source.edit_message_text(message)
     finally:
         db.close()
 
@@ -169,6 +226,7 @@ add_conversation = ConversationHandler(
         DOSE: [MessageHandler(chat_filter() & ~filters.COMMAND, dose_entered)],
         FOOD_RULE: [CallbackQueryHandler(food_rule_chosen, pattern=r"^food_")],
         NUM_TIMES: [CallbackQueryHandler(num_times_chosen, pattern=r"^numtimes_")],
+        CONFIRM_TIMES: [CallbackQueryHandler(times_confirmed, pattern=r"^times_")],
         TIME_SLOT: [MessageHandler(chat_filter() & ~filters.COMMAND, time_slot_entered)],
     },
     fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
