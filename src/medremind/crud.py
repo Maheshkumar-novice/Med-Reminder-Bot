@@ -59,24 +59,37 @@ def list_medications(db: Session) -> list[Medication]:
     )
 
 
-def get_active_medications(db: Session) -> list[Medication]:
-    """Get only active medications."""
+def get_active_medications(db: Session, person_id: int | None = None) -> list[Medication]:
+    """Get active medications, optionally filtered by person."""
+    q = db.query(Medication).filter(Medication.active.is_(True))
+    if person_id is not None:
+        q = q.filter(Medication.person_id == person_id)
     return (
-        db.query(Medication)
-        .filter(Medication.active.is_(True))
-        .options(joinedload(Medication.person), joinedload(Medication.schedules))
+        q.options(joinedload(Medication.person), joinedload(Medication.schedules))
         .order_by(Medication.person_id, Medication.name)
         .all()
     )
 
 
-def get_paused_medications(db: Session) -> list[Medication]:
-    """Get only paused medications."""
+def get_paused_medications(db: Session, person_id: int | None = None) -> list[Medication]:
+    """Get paused medications, optionally filtered by person."""
+    q = db.query(Medication).filter(Medication.active.is_(False))
+    if person_id is not None:
+        q = q.filter(Medication.person_id == person_id)
+    return (
+        q.options(joinedload(Medication.person), joinedload(Medication.schedules))
+        .order_by(Medication.person_id, Medication.name)
+        .all()
+    )
+
+
+def get_medications_for_person(db: Session, person_id: int) -> list[Medication]:
+    """Get all medications (active + paused) for a person."""
     return (
         db.query(Medication)
-        .filter(Medication.active.is_(False))
+        .filter(Medication.person_id == person_id)
         .options(joinedload(Medication.person), joinedload(Medication.schedules))
-        .order_by(Medication.person_id, Medication.name)
+        .order_by(Medication.name)
         .all()
     )
 
