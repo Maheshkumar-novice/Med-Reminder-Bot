@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore", category=PTBUserWarning, message=".*per_messag
 
 from medremind.bot import create_bot_app
 from medremind.database import init_db
-from medremind.scheduler import load_all_jobs, scheduler, set_bot_app
+from medremind.scheduler import refresh_jobs, scheduler, set_bot_app
 
 BOT_COMMANDS = [
     BotCommand("add", "Add a new medication"),
@@ -18,6 +18,7 @@ BOT_COMMANDS = [
     BotCommand("pause", "Pause a medication"),
     BotCommand("resume", "Resume a paused medication"),
     BotCommand("delete", "Delete a medication"),
+    BotCommand("today", "Remaining reminders for today"),
     BotCommand("addperson", "Add a new person"),
     BotCommand("listpersons", "List all persons"),
     BotCommand("removeperson", "Remove a person"),
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 async def _post_init(app):
     """Called after Application.initialize() — start scheduler inside the event loop."""
     scheduler.start()
-    load_all_jobs()
+    refresh_jobs()
     set_bot_app(app)
     await app.bot.set_my_commands(BOT_COMMANDS)
     logger.info("Scheduler started, bot commands registered")

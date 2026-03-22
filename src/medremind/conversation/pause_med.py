@@ -12,7 +12,7 @@ from telegram.ext import (
 from medremind.constants import chat_filter
 from medremind.crud import get_active_medications, get_persons, pause_medication
 from medremind.database import get_db
-from medremind.scheduler import remove_jobs_for_medication
+from medremind.scheduler import refresh_jobs
 
 CHOOSE_PERSON, CHOOSE_MED = range(2)
 
@@ -85,7 +85,7 @@ async def med_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         med = pause_medication(db, med_id)
         if med:
-            remove_jobs_for_medication(med.id, med.schedules)
+            refresh_jobs()
             await query.edit_message_text(
                 f"⏸ Paused: {context.user_data['pause_person_name']} — {med.name} {med.dose}\n"
                 f"Use /resume to reactivate."

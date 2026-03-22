@@ -10,9 +10,9 @@ from telegram.ext import (
 )
 
 from medremind.constants import chat_filter
-from medremind.crud import deactivate_person, get_active_medications, get_persons
+from medremind.crud import deactivate_person, get_persons
 from medremind.database import get_db
-from medremind.scheduler import remove_jobs_for_medication
+from medremind.scheduler import refresh_jobs
 
 CHOOSE_PERSON, CONFIRM = range(2)
 
@@ -79,12 +79,9 @@ async def confirm_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = get_db()
     try:
-        meds = get_active_medications(db, person_id=person_id)
-        for med in meds:
-            remove_jobs_for_medication(med.id, med.schedules)
-
         person = deactivate_person(db, person_id)
         if person:
+            refresh_jobs()
             await query.edit_message_text(
                 f"🗑 Removed {person_name}. All their medications have been paused."
             )

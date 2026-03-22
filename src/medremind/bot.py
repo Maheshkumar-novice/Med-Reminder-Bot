@@ -2,17 +2,21 @@
 
 import logging
 from collections.abc import Callable, Coroutine
+from datetime import datetime
 from typing import Any
 
+import pytz
 from telegram import Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
 )
 
 from medremind.config import settings
 from medremind.constants import FOOD_RULE_LABELS, chat_filter
+from medremind.scheduler import SNOOZE_MINUTES, format_time_12hr, schedule_snooze
 
 from medremind.conversation.add_med import add_conversation
 from medremind.conversation.add_person import addperson_conversation
@@ -20,7 +24,7 @@ from medremind.conversation.delete_med import delete_conversation
 from medremind.conversation.pause_med import pause_conversation
 from medremind.conversation.remove_person import removeperson_conversation
 from medremind.conversation.resume_med import resume_conversation
-from medremind.crud import get_persons, list_medications
+from medremind.crud import get_active_schedules, get_persons, list_medications
 from medremind.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,52 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /today command — show remaining reminders for today."""
+    tz = pytz.timezone(settings.timezone)
+    now = datetime.now(tz)
+    current_hhmm = now.strftime("%H:%M")
+
+    db = get_db()
+    try:
+        schedules = get_active_schedules(db)
+
+        if not schedules:
+            await update.message.reply_text("No active medications scheduled.")
+            return
+
+        # Filter to remaining times today
+        upcoming = [s for s in schedules if s.time_hhmm >= current_hhmm]
+
+        if not upcoming:
+            await update.message.reply_text(
+                f"✅ All done for today!\n\n🕐 {now.strftime('%I:%M %p')} · {settings.timezone}"
+            )
+            return
+
+        # Group by time, then by person
+        by_time: dict[str, dict[str, list]] = {}
+        for s in upcoming:
+            t = s.time_hhmm
+            person = s.medication.person.name
+            by_time.setdefault(t, {}).setdefault(person, []).append(s.medication)
+
+        lines = [f"📅 Remaining today ({now.strftime('%b %d')})\n"]
+        for time_hhmm in sorted(by_time.keys()):
+            time_label = format_time_12hr(time_hhmm)
+            lines.append(f"⏰ {time_label}")
+            for person_name, meds in by_time[time_hhmm].items():
+                for med in meds:
+                    food_label = FOOD_RULE_LABELS.get(med.food_rule, med.food_rule)
+                    lines.append(f"  💊 {person_name} · {med.name} {med.dose} ({food_label})")
+            lines.append("")
+
+        lines.append(f"🕐 Timezone: {settings.timezone}")
+        await update.message.reply_text("\n".join(lines).strip())
+    finally:
+        db.close()
+
+
 async def cmd_listpersons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /listpersons command."""
     db = get_db()
@@ -92,13 +142,30 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list — List all medications\n"
         "/pause — Pause a medication\n"
         "/resume — Resume a paused medication\n"
-        "/delete — Permanently delete a medication\n\n"
+        "/delete — Permanently delete a medication\n"
+        "/today — Show remaining reminders for today\n\n"
         "👥 Persons\n"
         "/addperson — Add a new person\n"
         "/listpersons — List all persons\n"
         "/removeperson — Remove a person\n\n"
         "/help — Show this help message"
     )
+
+
+async def snooze_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle snooze button press on reminder messages."""
+    query = update.callback_query
+    await query.answer(f"Will remind again in {SNOOZE_MINUTES} minutes")
+
+    # Parse: snooze_HH:MM_PersonName
+    parts = query.data.split("_", 2)
+    time_hhmm = parts[1]
+    person_name = parts[2]
+
+    schedule_snooze(time_hhmm, person_name)
+
+    # Update the message to show it was snoozed
+    await query.edit_message_reply_markup(reply_markup=None)
 
 
 PostHook = Callable[[Application], Coroutine[Any, Any, None]]
@@ -126,8 +193,12 @@ def create_bot_app(
 
     # Simple command handlers
     app.add_handler(CommandHandler("list", cmd_list, filters=chat_filter()))
+    app.add_handler(CommandHandler("today", cmd_today, filters=chat_filter()))
     app.add_handler(CommandHandler("listpersons", cmd_listpersons, filters=chat_filter()))
     app.add_handler(CommandHandler("help", cmd_help, filters=chat_filter()))
     app.add_handler(CommandHandler("start", cmd_help, filters=chat_filter()))
+
+    # Snooze callback (outside conversation handlers)
+    app.add_handler(CallbackQueryHandler(snooze_callback, pattern=r"^snooze_"))
 
     return app

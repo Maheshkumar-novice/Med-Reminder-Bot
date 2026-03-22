@@ -16,7 +16,7 @@ from medremind.config import settings
 from medremind.constants import FOOD_RULE_LABELS, chat_filter
 from medremind.crud import add_medication, get_persons
 from medremind.database import get_db
-from medremind.scheduler import add_jobs_for_medication
+from medremind.scheduler import refresh_jobs
 
 PERSON, MED_NAME, DOSE, FOOD_RULE, NUM_TIMES, CONFIRM_TIMES, TIME_SLOT = range(7)
 
@@ -220,7 +220,7 @@ async def _save_medication(source, context, times):
             food_rule=context.user_data["food_rule"],
             times=times,
         )
-        add_jobs_for_medication(med.id, med.schedules)
+        refresh_jobs()
 
         food_label = FOOD_RULE_LABELS.get(med.food_rule, med.food_rule)
         times_str = _format_times(times)

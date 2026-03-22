@@ -17,7 +17,7 @@ from medremind.crud import (
     get_persons,
 )
 from medremind.database import get_db
-from medremind.scheduler import remove_jobs_for_medication
+from medremind.scheduler import refresh_jobs
 
 CHOOSE_PERSON, CHOOSE_MED, CONFIRM = range(3)
 
@@ -128,8 +128,8 @@ async def confirm_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         med = get_medication_with_schedules(db, med_id)
         if med:
-            remove_jobs_for_medication(med.id, med.schedules)
             delete_medication(db, med_id)
+            refresh_jobs()
             await query.edit_message_text(
                 f"🗑 Deleted: {context.user_data['delete_med_name']}"
             )
