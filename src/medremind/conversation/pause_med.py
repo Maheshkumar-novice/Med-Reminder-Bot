@@ -17,6 +17,10 @@ from medremind.scheduler import remove_jobs_for_medication
 CHOOSE_PERSON, CHOOSE_MED = range(2)
 
 
+def _cancel_row():
+    return [InlineKeyboardButton("❌ Cancel", callback_data="pause_cancel")]
+
+
 async def pause_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     try:
@@ -29,7 +33,7 @@ async def pause_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton(p.name, callback_data=f"pausep_{p.id}_{p.name}")]
             for p in persons
-        ]
+        ] + [_cancel_row()]
         await update.message.reply_text(
             "Who is this for?", reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -62,7 +66,7 @@ async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data=f"pausem_{med.id}",
             )]
             for med in meds
-        ]
+        ] + [_cancel_row()]
         await query.edit_message_text(
             f"Which medication to pause for {person_name}?",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -94,6 +98,13 @@ async def med_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Cancelled.")
+    return ConversationHandler.END
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cancelled.")
     return ConversationHandler.END
@@ -105,6 +116,9 @@ pause_conversation = ConversationHandler(
         CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^pausep_")],
         CHOOSE_MED: [CallbackQueryHandler(med_chosen, pattern=r"^pausem_")],
     },
-    fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    fallbacks=[
+        CallbackQueryHandler(cancel_callback, pattern=r"^pause_cancel$"),
+        CommandHandler("cancel", cancel, filters=chat_filter()),
+    ],
     per_message=False,
 )

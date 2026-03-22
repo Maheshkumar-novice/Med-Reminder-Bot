@@ -40,6 +40,25 @@ def _format_times(times: list[str]) -> str:
     return ", ".join(times)
 
 
+def _cancel_row():
+    return [InlineKeyboardButton("❌ Cancel", callback_data="add_cancel")]
+
+
+def _summary(context) -> str:
+    """Build a summary of selections so far."""
+    ud = context.user_data
+    parts = []
+    if "person_name" in ud:
+        parts.append(f"👤 {ud['person_name']}")
+    if "med_name" in ud:
+        parts.append(f"💊 {ud['med_name']}")
+    if "dose" in ud:
+        parts.append(f"💉 {ud['dose']}")
+    if "food_rule" in ud:
+        parts.append(f"🍽 {FOOD_RULE_LABELS.get(ud['food_rule'], ud['food_rule'])}")
+    return " · ".join(parts)
+
+
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     try:
@@ -52,7 +71,7 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton(p.name, callback_data=f"person_{p.id}_{p.name}")]
             for p in persons
-        ]
+        ] + [_cancel_row()]
         await update.message.reply_text(
             "Who is this for?", reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -75,7 +94,9 @@ async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def med_name_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["med_name"] = update.message.text.strip()
-    await update.message.reply_text("Dose? (e.g. 500mg, 1 tablet)")
+    await update.message.reply_text(
+        f"{_summary(context)}\n\nDose? (e.g. 500mg, 1 tablet)"
+    )
     return DOSE
 
 
@@ -85,9 +106,10 @@ async def dose_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(label, callback_data=f"food_{key}")]
         for key, label in FOOD_RULE_OPTIONS.items()
-    ]
+    ] + [_cancel_row()]
     await update.message.reply_text(
-        "Food rule?", reply_markup=InlineKeyboardMarkup(keyboard)
+        f"{_summary(context)}\n\nFood rule?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return FOOD_RULE
 
@@ -100,10 +122,11 @@ async def food_rule_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["food_rule"] = food_key
 
     keyboard = [
-        [InlineKeyboardButton(str(n), callback_data=f"numtimes_{n}") for n in range(1, 5)]
+        [InlineKeyboardButton(str(n), callback_data=f"numtimes_{n}") for n in range(1, 5)],
+        _cancel_row(),
     ]
     await query.edit_message_text(
-        f"{FOOD_RULE_OPTIONS[food_key]}\n\nHow many times per day?",
+        f"{_summary(context)}\n\nHow many times per day?",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return NUM_TIMES
@@ -123,11 +146,12 @@ async def num_times_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [
             InlineKeyboardButton("✅ Accept", callback_data="times_accept"),
             InlineKeyboardButton("✏️ Edit", callback_data="times_edit"),
-        ]
+        ],
+        _cancel_row(),
     ]
     await query.edit_message_text(
-        f"{n}x per day\n\n"
-        f"Suggested times: {_format_times(suggested)}\n"
+        f"{_summary(context)}\n\n"
+        f"{n}x per day — Suggested: {_format_times(suggested)}\n"
         f"(Timezone: {settings.timezone})",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
@@ -142,12 +166,13 @@ async def times_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "accept":
         times = context.user_data["suggested_times"]
-        await query.edit_message_text(f"Times: {_format_times(times)}")
+        await query.edit_message_text(f"{_summary(context)} · ⏰ {_format_times(times)}")
         return await _save_medication(query, context, times)
 
     # Edit — start manual time entry
     context.user_data["times"] = []
     await query.edit_message_text(
+        f"{_summary(context)}\n\n"
         f"Time for dose 1? (HH:MM, 24hr format)\n"
         f"(Timezone: {settings.timezone})"
     )
@@ -213,6 +238,13 @@ async def _save_medication(source, context, times):
     return ConversationHandler.END
 
 
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Cancelled.")
+    return ConversationHandler.END
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cancelled.")
     return ConversationHandler.END
@@ -229,6 +261,9 @@ add_conversation = ConversationHandler(
         CONFIRM_TIMES: [CallbackQueryHandler(times_confirmed, pattern=r"^times_")],
         TIME_SLOT: [MessageHandler(chat_filter() & ~filters.COMMAND, time_slot_entered)],
     },
-    fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    fallbacks=[
+        CallbackQueryHandler(cancel_callback, pattern=r"^add_cancel$"),
+        CommandHandler("cancel", cancel, filters=chat_filter()),
+    ],
     per_message=False,
 )

@@ -6,7 +6,6 @@ from telegram.ext import (
     CommandHandler,
     ConversationHandler,
     ContextTypes,
-    MessageHandler,
     filters,
 )
 
@@ -16,6 +15,10 @@ from medremind.database import get_db
 from medremind.scheduler import remove_jobs_for_medication
 
 CHOOSE_PERSON, CONFIRM = range(2)
+
+
+def _cancel_row():
+    return [InlineKeyboardButton("❌ Cancel", callback_data="rmp_cancel")]
 
 
 async def remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -30,7 +33,7 @@ async def remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton(p.name, callback_data=f"rmp_{p.id}_{p.name}")]
             for p in persons
-        ]
+        ] + [_cancel_row()]
         await update.message.reply_text(
             "Which person to remove?", reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -47,18 +50,28 @@ async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["remove_person_id"] = int(person_id)
     context.user_data["remove_person_name"] = person_name
 
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Yes, remove", callback_data="rmpconfirm_yes"),
+            InlineKeyboardButton("❌ No", callback_data="rmpconfirm_no"),
+        ]
+    ]
     await query.edit_message_text(
         f"This will deactivate {person_name} and pause all their medications.\n\n"
-        f"Type YES to confirm."
+        f"Are you sure?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return CONFIRM
 
 
 async def confirm_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    query = update.callback_query
+    await query.answer()
 
-    if text != "YES":
-        await update.message.reply_text("Cancelled.")
+    confirmed = query.data.split("_")[1] == "yes"
+
+    if not confirmed:
+        await query.edit_message_text("Cancelled.")
         return ConversationHandler.END
 
     person_id = context.user_data["remove_person_id"]
@@ -72,14 +85,21 @@ async def confirm_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         person = deactivate_person(db, person_id)
         if person:
-            await update.message.reply_text(
+            await query.edit_message_text(
                 f"🗑 Removed {person_name}. All their medications have been paused."
             )
         else:
-            await update.message.reply_text("Person not found.")
+            await query.edit_message_text("Person not found.")
     finally:
         db.close()
 
+    return ConversationHandler.END
+
+
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Cancelled.")
     return ConversationHandler.END
 
 
@@ -91,9 +111,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 removeperson_conversation = ConversationHandler(
     entry_points=[CommandHandler("removeperson", remove_start, filters=chat_filter())],
     states={
-        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^rmp_")],
-        CONFIRM: [MessageHandler(chat_filter() & ~filters.COMMAND, confirm_remove)],
+        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^rmp_\\d")],
+        CONFIRM: [CallbackQueryHandler(confirm_remove, pattern=r"^rmpconfirm_")],
     },
-    fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    fallbacks=[
+        CallbackQueryHandler(cancel_callback, pattern=r"^rmp_cancel$"),
+        CommandHandler("cancel", cancel, filters=chat_filter()),
+    ],
     per_message=False,
 )

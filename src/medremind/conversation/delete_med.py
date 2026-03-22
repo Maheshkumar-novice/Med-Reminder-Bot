@@ -6,7 +6,6 @@ from telegram.ext import (
     CommandHandler,
     ConversationHandler,
     ContextTypes,
-    MessageHandler,
     filters,
 )
 
@@ -23,6 +22,10 @@ from medremind.scheduler import remove_jobs_for_medication
 CHOOSE_PERSON, CHOOSE_MED, CONFIRM = range(3)
 
 
+def _cancel_row():
+    return [InlineKeyboardButton("❌ Cancel", callback_data="del_cancel")]
+
+
 async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     try:
@@ -35,7 +38,7 @@ async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
             [InlineKeyboardButton(p.name, callback_data=f"delp_{p.id}_{p.name}")]
             for p in persons
-        ]
+        ] + [_cancel_row()]
         await update.message.reply_text(
             "Who is this for?", reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -68,7 +71,7 @@ async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 callback_data=f"delm_{med.id}",
             )]
             for med in meds
-        ]
+        ] + [_cancel_row()]
         await query.edit_message_text(
             f"Which medication to delete for {person_name}?",
             reply_markup=InlineKeyboardMarkup(keyboard),
@@ -97,19 +100,27 @@ async def med_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Yes, delete", callback_data="delconfirm_yes"),
+            InlineKeyboardButton("❌ No", callback_data="delconfirm_no"),
+        ]
+    ]
     await query.edit_message_text(
-        f"Are you sure you want to permanently delete "
-        f"{context.user_data['delete_med_name']}?\n\n"
-        f"Type YES to confirm."
+        f"Permanently delete {context.user_data['delete_med_name']}?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
     return CONFIRM
 
 
 async def confirm_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+    query = update.callback_query
+    await query.answer()
 
-    if text != "YES":
-        await update.message.reply_text("Deletion cancelled.")
+    confirmed = query.data.split("_")[1] == "yes"
+
+    if not confirmed:
+        await query.edit_message_text("Deletion cancelled.")
         return ConversationHandler.END
 
     med_id = context.user_data["delete_med_id"]
@@ -119,14 +130,21 @@ async def confirm_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if med:
             remove_jobs_for_medication(med.id, med.schedules)
             delete_medication(db, med_id)
-            await update.message.reply_text(
+            await query.edit_message_text(
                 f"🗑 Deleted: {context.user_data['delete_med_name']}"
             )
         else:
-            await update.message.reply_text("Medication not found.")
+            await query.edit_message_text("Medication not found.")
     finally:
         db.close()
 
+    return ConversationHandler.END
+
+
+async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("Cancelled.")
     return ConversationHandler.END
 
 
@@ -140,8 +158,11 @@ delete_conversation = ConversationHandler(
     states={
         CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^delp_")],
         CHOOSE_MED: [CallbackQueryHandler(med_chosen, pattern=r"^delm_")],
-        CONFIRM: [MessageHandler(chat_filter() & ~filters.COMMAND, confirm_delete)],
+        CONFIRM: [CallbackQueryHandler(confirm_delete, pattern=r"^delconfirm_")],
     },
-    fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    fallbacks=[
+        CallbackQueryHandler(cancel_callback, pattern=r"^del_cancel$"),
+        CommandHandler("cancel", cancel, filters=chat_filter()),
+    ],
     per_message=False,
 )
