@@ -49,8 +49,9 @@ async def send_reminder(schedule_id: int):
         if not med or not med.active:
             return
 
-        # Check end date
-        if med.end_date and date.today() > med.end_date:
+        # Check end date using configured timezone
+        today = datetime.now(pytz.timezone(settings.timezone)).date()
+        if med.end_date and today > med.end_date:
             logger.info(
                 "Medication %s has passed end date, auto-pausing", med.id
             )
