@@ -17,8 +17,9 @@ from medremind.conversation.add_med import add_conversation
 from medremind.conversation.add_person import addperson_conversation
 from medremind.conversation.delete_med import delete_conversation
 from medremind.conversation.pause_med import pause_conversation
+from medremind.conversation.remove_person import removeperson_conversation
 from medremind.conversation.resume_med import resume_conversation
-from medremind.crud import list_medications
+from medremind.crud import get_persons, list_medications
 from medremind.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,25 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         db.close()
 
 
+async def cmd_listpersons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /listpersons command."""
+    db = get_db()
+    try:
+        persons = get_persons(db)
+
+        if not persons:
+            await update.message.reply_text("No persons found. Use /addperson to add one.")
+            return
+
+        lines = ["👥 Persons"]
+        for p in persons:
+            lines.append(f"  • {p.name}")
+
+        await update.message.reply_text("\n".join(lines))
+    finally:
+        db.close()
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
     await update.message.reply_text(
@@ -71,6 +91,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/resume — Resume a paused medication\n"
         "/delete — Permanently delete a medication\n"
         "/addperson — Add a new person\n"
+        "/listpersons — List all persons\n"
+        "/removeperson — Remove a person\n"
         "/help — Show this help message"
     )
 
@@ -93,12 +115,14 @@ def create_bot_app(
     # Conversation handlers (order matters — add before simple handlers)
     app.add_handler(add_conversation)
     app.add_handler(addperson_conversation)
+    app.add_handler(removeperson_conversation)
     app.add_handler(pause_conversation)
     app.add_handler(resume_conversation)
     app.add_handler(delete_conversation)
 
     # Simple command handlers
     app.add_handler(CommandHandler("list", cmd_list, filters=chat_filter()))
+    app.add_handler(CommandHandler("listpersons", cmd_listpersons, filters=chat_filter()))
     app.add_handler(CommandHandler("help", cmd_help, filters=chat_filter()))
     app.add_handler(CommandHandler("start", cmd_help, filters=chat_filter()))
 

@@ -23,6 +23,21 @@ def add_person(db: Session, name: str) -> Person | None:
     return person
 
 
+def deactivate_person(db: Session, person_id: int) -> Person | None:
+    """Soft-delete a person and pause all their medications."""
+    person = db.query(Person).filter(Person.id == person_id).first()
+    if not person:
+        return None
+    person.active = False
+    for med in person.medications:
+        med.active = False
+        for s in med.schedules:
+            s.active = False
+    db.commit()
+    db.refresh(person)
+    return person
+
+
 def add_medication(
     db: Session,
     person_id: int,
