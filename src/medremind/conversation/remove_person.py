@@ -1,7 +1,8 @@
 """Conversation handler for /removeperson command."""
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
+    CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     ContextTypes,
@@ -26,33 +27,28 @@ async def remove_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No persons found.")
             return ConversationHandler.END
 
-        lines = ["Which person to remove?"]
-        person_map = {}
-        for i, p in enumerate(persons, 1):
-            lines.append(f"{i}. {p.name}")
-            person_map[str(i)] = {"id": p.id, "name": p.name}
-
-        context.user_data["remove_person_map"] = person_map
-        await update.message.reply_text("\n".join(lines))
+        keyboard = [
+            [InlineKeyboardButton(p.name, callback_data=f"rmp_{p.id}_{p.name}")]
+            for p in persons
+        ]
+        await update.message.reply_text(
+            "Which person to remove?", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return CHOOSE_PERSON
     finally:
         db.close()
 
 
 async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    person_map = context.user_data.get("remove_person_map", {})
+    query = update.callback_query
+    await query.answer()
 
-    if choice not in person_map:
-        await update.message.reply_text("Please pick a number from the list.")
-        return CHOOSE_PERSON
+    _, person_id, person_name = query.data.split("_", 2)
+    context.user_data["remove_person_id"] = int(person_id)
+    context.user_data["remove_person_name"] = person_name
 
-    person = person_map[choice]
-    context.user_data["remove_person_id"] = person["id"]
-    context.user_data["remove_person_name"] = person["name"]
-
-    await update.message.reply_text(
-        f"This will deactivate {person['name']} and pause all their medications.\n\n"
+    await query.edit_message_text(
+        f"This will deactivate {person_name} and pause all their medications.\n\n"
         f"Type YES to confirm."
     )
     return CONFIRM
@@ -70,7 +66,6 @@ async def confirm_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db = get_db()
     try:
-        # Remove scheduler jobs for all active meds before deactivating
         meds = get_active_medications(db, person_id=person_id)
         for med in meds:
             remove_jobs_for_medication(med.id, med.schedules)
@@ -96,8 +91,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 removeperson_conversation = ConversationHandler(
     entry_points=[CommandHandler("removeperson", remove_start, filters=chat_filter())],
     states={
-        CHOOSE_PERSON: [MessageHandler(chat_filter() & ~filters.COMMAND, person_chosen)],
+        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^rmp_")],
         CONFIRM: [MessageHandler(chat_filter() & ~filters.COMMAND, confirm_remove)],
     },
     fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    per_message=False,
 )

@@ -1,7 +1,8 @@
 """Conversation handler for /delete command."""
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
+    CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     ContextTypes,
@@ -31,67 +32,62 @@ async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No persons found. Use /addperson first.")
             return ConversationHandler.END
 
-        lines = ["Who is this for?"]
-        person_map = {}
-        for i, p in enumerate(persons, 1):
-            lines.append(f"{i}. {p.name}")
-            person_map[str(i)] = {"id": p.id, "name": p.name}
-
-        context.user_data["delete_person_map"] = person_map
-        await update.message.reply_text("\n".join(lines))
+        keyboard = [
+            [InlineKeyboardButton(p.name, callback_data=f"delp_{p.id}_{p.name}")]
+            for p in persons
+        ]
+        await update.message.reply_text(
+            "Who is this for?", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return CHOOSE_PERSON
     finally:
         db.close()
 
 
 async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    person_map = context.user_data.get("delete_person_map", {})
+    query = update.callback_query
+    await query.answer()
 
-    if choice not in person_map:
-        await update.message.reply_text("Please pick a number from the list.")
-        return CHOOSE_PERSON
-
-    person = person_map[choice]
-    context.user_data["delete_person_name"] = person["name"]
+    _, person_id, person_name = query.data.split("_", 2)
+    person_id = int(person_id)
+    context.user_data["delete_person_name"] = person_name
 
     db = get_db()
     try:
-        meds = get_medications_for_person(db, person["id"])
+        meds = get_medications_for_person(db, person_id)
 
         if not meds:
-            await update.message.reply_text(
-                f"No medications found for {person['name']}."
+            await query.edit_message_text(
+                f"No medications found for {person_name}."
             )
             return ConversationHandler.END
 
-        lines = [f"Which medication to delete for {person['name']}?"]
-        med_map = {}
-        for i, med in enumerate(meds, 1):
-            status = " [PAUSED]" if not med.active else ""
-            lines.append(f"{i}. {med.name} {med.dose}{status}")
-            med_map[str(i)] = med.id
-
-        context.user_data["delete_med_map"] = med_map
-        await update.message.reply_text("\n".join(lines))
+        keyboard = [
+            [InlineKeyboardButton(
+                f"{med.name} {med.dose}{' [PAUSED]' if not med.active else ''}",
+                callback_data=f"delm_{med.id}",
+            )]
+            for med in meds
+        ]
+        await query.edit_message_text(
+            f"Which medication to delete for {person_name}?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
         return CHOOSE_MED
     finally:
         db.close()
 
 
 async def med_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    med_map = context.user_data.get("delete_med_map", {})
+    query = update.callback_query
+    await query.answer()
 
-    if choice not in med_map:
-        await update.message.reply_text("Please pick a number from the list.")
-        return CHOOSE_MED
-
-    context.user_data["delete_med_id"] = med_map[choice]
+    med_id = int(query.data.split("_")[1])
+    context.user_data["delete_med_id"] = med_id
 
     db = get_db()
     try:
-        med = get_medication_with_schedules(db, med_map[choice])
+        med = get_medication_with_schedules(db, med_id)
         if med:
             context.user_data["delete_med_name"] = (
                 f"{context.user_data['delete_person_name']} — {med.name} {med.dose}"
@@ -101,7 +97,7 @@ async def med_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         db.close()
 
-    await update.message.reply_text(
+    await query.edit_message_text(
         f"Are you sure you want to permanently delete "
         f"{context.user_data['delete_med_name']}?\n\n"
         f"Type YES to confirm."
@@ -142,9 +138,10 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 delete_conversation = ConversationHandler(
     entry_points=[CommandHandler("delete", delete_start, filters=chat_filter())],
     states={
-        CHOOSE_PERSON: [MessageHandler(chat_filter() & ~filters.COMMAND, person_chosen)],
-        CHOOSE_MED: [MessageHandler(chat_filter() & ~filters.COMMAND, med_chosen)],
+        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^delp_")],
+        CHOOSE_MED: [CallbackQueryHandler(med_chosen, pattern=r"^delm_")],
         CONFIRM: [MessageHandler(chat_filter() & ~filters.COMMAND, confirm_delete)],
     },
     fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    per_message=False,
 )

@@ -85,14 +85,16 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
     await update.message.reply_text(
         "📋 MedRemind Commands\n\n"
+        "💊 Medications\n"
         "/add — Add a new medication\n"
         "/list — List all medications\n"
         "/pause — Pause a medication\n"
         "/resume — Resume a paused medication\n"
-        "/delete — Permanently delete a medication\n"
+        "/delete — Permanently delete a medication\n\n"
+        "👥 Persons\n"
         "/addperson — Add a new person\n"
         "/listpersons — List all persons\n"
-        "/removeperson — Remove a person\n"
+        "/removeperson — Remove a person\n\n"
         "/help — Show this help message"
     )
 

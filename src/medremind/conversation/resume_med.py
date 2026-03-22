@@ -1,11 +1,11 @@
 """Conversation handler for /resume command."""
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
+    CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     ContextTypes,
-    MessageHandler,
     filters,
 )
 
@@ -26,75 +26,70 @@ async def resume_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No persons found. Use /addperson first.")
             return ConversationHandler.END
 
-        lines = ["Who is this for?"]
-        person_map = {}
-        for i, p in enumerate(persons, 1):
-            lines.append(f"{i}. {p.name}")
-            person_map[str(i)] = {"id": p.id, "name": p.name}
-
-        context.user_data["resume_person_map"] = person_map
-        await update.message.reply_text("\n".join(lines))
+        keyboard = [
+            [InlineKeyboardButton(p.name, callback_data=f"resp_{p.id}_{p.name}")]
+            for p in persons
+        ]
+        await update.message.reply_text(
+            "Who is this for?", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
         return CHOOSE_PERSON
     finally:
         db.close()
 
 
 async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    person_map = context.user_data.get("resume_person_map", {})
+    query = update.callback_query
+    await query.answer()
 
-    if choice not in person_map:
-        await update.message.reply_text("Please pick a number from the list.")
-        return CHOOSE_PERSON
-
-    person = person_map[choice]
-    context.user_data["resume_person_name"] = person["name"]
+    _, person_id, person_name = query.data.split("_", 2)
+    person_id = int(person_id)
+    context.user_data["resume_person_name"] = person_name
 
     db = get_db()
     try:
-        meds = get_paused_medications(db, person_id=person["id"])
+        meds = get_paused_medications(db, person_id=person_id)
 
         if not meds:
-            await update.message.reply_text(
-                f"No paused medications found for {person['name']}."
+            await query.edit_message_text(
+                f"No paused medications found for {person_name}."
             )
             return ConversationHandler.END
 
-        lines = [f"Which medication to resume for {person['name']}?"]
-        med_map = {}
-        for i, med in enumerate(meds, 1):
-            lines.append(f"{i}. {med.name} {med.dose}")
-            med_map[str(i)] = med.id
-
-        context.user_data["resume_med_map"] = med_map
-        await update.message.reply_text("\n".join(lines))
+        keyboard = [
+            [InlineKeyboardButton(
+                f"{med.name} {med.dose}",
+                callback_data=f"resm_{med.id}",
+            )]
+            for med in meds
+        ]
+        await query.edit_message_text(
+            f"Which medication to resume for {person_name}?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
         return CHOOSE_MED
     finally:
         db.close()
 
 
 async def med_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    med_map = context.user_data.get("resume_med_map", {})
+    query = update.callback_query
+    await query.answer()
 
-    if choice not in med_map:
-        await update.message.reply_text("Please pick a number from the list.")
-        return CHOOSE_MED
-
-    med_id = med_map[choice]
+    med_id = int(query.data.split("_")[1])
     db = get_db()
     try:
         med = resume_medication(db, med_id)
         if med:
             add_jobs_for_medication(med.id, med.schedules)
             times_str = ", ".join(s.time_hhmm for s in med.schedules)
-            await update.message.reply_text(
+            await query.edit_message_text(
                 f"▶️ Resumed: {context.user_data['resume_person_name']} — {med.name} {med.dose}\n"
                 f"Scheduled at: {times_str}\n"
                 f"Reminders are active."
             )
         else:
-            await update.message.reply_text("Medication not found.")
+            await query.edit_message_text("Medication not found.")
     finally:
         db.close()
 
@@ -109,8 +104,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 resume_conversation = ConversationHandler(
     entry_points=[CommandHandler("resume", resume_start, filters=chat_filter())],
     states={
-        CHOOSE_PERSON: [MessageHandler(chat_filter() & ~filters.COMMAND, person_chosen)],
-        CHOOSE_MED: [MessageHandler(chat_filter() & ~filters.COMMAND, med_chosen)],
+        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^resp_")],
+        CHOOSE_MED: [CallbackQueryHandler(med_chosen, pattern=r"^resm_")],
     },
     fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    per_message=False,
 )

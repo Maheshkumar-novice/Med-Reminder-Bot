@@ -2,8 +2,9 @@
 
 import re
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
+    CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     ContextTypes,
@@ -16,15 +17,14 @@ from medremind.crud import add_medication, get_persons
 from medremind.database import get_db
 from medremind.scheduler import add_jobs_for_medication
 
-# Conversation states
 PERSON, MED_NAME, DOSE, FOOD_RULE, NUM_TIMES, TIME_SLOT = range(6)
 
 FOOD_RULE_OPTIONS = {
-    "1": "before_food",
-    "2": "after_food",
-    "3": "with_food",
-    "4": "empty_stomach",
-    "5": "any",
+    "before_food": "Before food",
+    "after_food": "After food",
+    "with_food": "With food",
+    "empty_stomach": "Empty stomach",
+    "any": "Any time",
 }
 
 
@@ -32,32 +32,32 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = get_db()
     try:
         persons = get_persons(db)
+
+        if not persons:
+            await update.message.reply_text("No persons found. Use /addperson first.")
+            return ConversationHandler.END
+
+        keyboard = [
+            [InlineKeyboardButton(p.name, callback_data=f"person_{p.id}_{p.name}")]
+            for p in persons
+        ]
+        await update.message.reply_text(
+            "Who is this for?", reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return PERSON
     finally:
         db.close()
 
-    lines = ["Who is this for?"]
-    for i, p in enumerate(persons, 1):
-        lines.append(f"{i}. {p.name}")
-
-    context.user_data["persons"] = {str(i): p.id for i, p in enumerate(persons, 1)}
-    context.user_data["person_names"] = {str(i): p.name for i, p in enumerate(persons, 1)}
-
-    await update.message.reply_text("\n".join(lines))
-    return PERSON
-
 
 async def person_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    persons = context.user_data.get("persons", {})
+    query = update.callback_query
+    await query.answer()
 
-    if choice not in persons:
-        await update.message.reply_text("Please pick a number from the list.")
-        return PERSON
+    _, person_id, person_name = query.data.split("_", 2)
+    context.user_data["person_id"] = int(person_id)
+    context.user_data["person_name"] = person_name
 
-    context.user_data["person_id"] = persons[choice]
-    context.user_data["person_name"] = context.user_data["person_names"][choice]
-
-    await update.message.reply_text("Medication name?")
+    await query.edit_message_text(f"👤 {person_name}\n\nMedication name?")
     return MED_NAME
 
 
@@ -69,41 +69,43 @@ async def med_name_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def dose_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["dose"] = update.message.text.strip()
+
+    keyboard = [
+        [InlineKeyboardButton(label, callback_data=f"food_{key}")]
+        for key, label in FOOD_RULE_OPTIONS.items()
+    ]
     await update.message.reply_text(
-        "Food rule?\n"
-        "1. Before food\n"
-        "2. After food\n"
-        "3. With food\n"
-        "4. Empty stomach\n"
-        "5. Any time"
+        "Food rule?", reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return FOOD_RULE
 
 
 async def food_rule_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    choice = update.message.text.strip()
-    if choice not in FOOD_RULE_OPTIONS:
-        await update.message.reply_text("Please pick a number from the list.")
-        return FOOD_RULE
+    query = update.callback_query
+    await query.answer()
 
-    context.user_data["food_rule"] = FOOD_RULE_OPTIONS[choice]
-    await update.message.reply_text("How many times per day?")
+    food_key = query.data.split("_", 1)[1]
+    context.user_data["food_rule"] = food_key
+
+    keyboard = [
+        [InlineKeyboardButton(str(n), callback_data=f"numtimes_{n}") for n in range(1, 5)]
+    ]
+    await query.edit_message_text(
+        f"{FOOD_RULE_OPTIONS[food_key]}\n\nHow many times per day?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
     return NUM_TIMES
 
 
-async def num_times_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    try:
-        n = int(text)
-        if n < 1 or n > 4:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text("Please enter a number between 1 and 4.")
-        return NUM_TIMES
+async def num_times_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
+    n = int(query.data.split("_")[1])
     context.user_data["num_times"] = n
     context.user_data["times"] = []
-    await update.message.reply_text("Time for dose 1? (HH:MM, 24hr format)")
+
+    await query.edit_message_text(f"{n}x per day\n\nTime for dose 1? (HH:MM, 24hr format)")
     return TIME_SLOT
 
 
@@ -126,7 +128,6 @@ async def time_slot_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Time for dose {slot_num}?")
         return TIME_SLOT
 
-    # All times collected — save to DB
     db = get_db()
     try:
         med = add_medication(
@@ -137,7 +138,6 @@ async def time_slot_entered(update: Update, context: ContextTypes.DEFAULT_TYPE):
             food_rule=context.user_data["food_rule"],
             times=times,
         )
-        # Schedule jobs
         add_jobs_for_medication(med.id, med.schedules)
 
         food_label = FOOD_RULE_LABELS.get(med.food_rule, med.food_rule)
@@ -164,12 +164,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 add_conversation = ConversationHandler(
     entry_points=[CommandHandler("add", add_start, filters=chat_filter())],
     states={
-        PERSON: [MessageHandler(chat_filter() & ~filters.COMMAND, person_chosen)],
+        PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^person_")],
         MED_NAME: [MessageHandler(chat_filter() & ~filters.COMMAND, med_name_entered)],
         DOSE: [MessageHandler(chat_filter() & ~filters.COMMAND, dose_entered)],
-        FOOD_RULE: [MessageHandler(chat_filter() & ~filters.COMMAND, food_rule_chosen)],
-        NUM_TIMES: [MessageHandler(chat_filter() & ~filters.COMMAND, num_times_entered)],
+        FOOD_RULE: [CallbackQueryHandler(food_rule_chosen, pattern=r"^food_")],
+        NUM_TIMES: [CallbackQueryHandler(num_times_chosen, pattern=r"^numtimes_")],
         TIME_SLOT: [MessageHandler(chat_filter() & ~filters.COMMAND, time_slot_entered)],
     },
     fallbacks=[CommandHandler("cancel", cancel, filters=chat_filter())],
+    per_message=False,
 )

@@ -1,10 +1,28 @@
 """Application entrypoint — starts bot and scheduler."""
 
 import logging
+import warnings
+
+from telegram import BotCommand
+from telegram.warnings import PTBUserWarning
+
+warnings.filterwarnings("ignore", category=PTBUserWarning, message=".*per_message.*")
 
 from medremind.bot import create_bot_app
 from medremind.database import init_db
 from medremind.scheduler import load_all_jobs, scheduler, set_bot_app
+
+BOT_COMMANDS = [
+    BotCommand("add", "Add a new medication"),
+    BotCommand("list", "List all medications"),
+    BotCommand("pause", "Pause a medication"),
+    BotCommand("resume", "Resume a paused medication"),
+    BotCommand("delete", "Delete a medication"),
+    BotCommand("addperson", "Add a new person"),
+    BotCommand("listpersons", "List all persons"),
+    BotCommand("removeperson", "Remove a person"),
+    BotCommand("help", "Show all commands"),
+]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,7 +36,8 @@ async def _post_init(app):
     scheduler.start()
     load_all_jobs()
     set_bot_app(app)
-    logger.info("Scheduler started")
+    await app.bot.set_my_commands(BOT_COMMANDS)
+    logger.info("Scheduler started, bot commands registered")
 
 
 async def _post_shutdown(app):
