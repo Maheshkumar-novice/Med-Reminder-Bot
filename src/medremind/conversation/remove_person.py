@@ -108,7 +108,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 removeperson_conversation = ConversationHandler(
     entry_points=[CommandHandler("removeperson", remove_start, filters=chat_filter())],
     states={
-        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^rmp_\\d")],
+        CHOOSE_PERSON: [CallbackQueryHandler(person_chosen, pattern=r"^rmp_\d")],
         CONFIRM: [CallbackQueryHandler(confirm_remove, pattern=r"^rmpconfirm_")],
     },
     fallbacks=[

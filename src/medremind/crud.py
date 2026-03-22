@@ -3,6 +3,7 @@
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from medremind.constants import EDITABLE_MED_FIELDS
 from medremind.database import Medication, Person, Schedule
 
 
@@ -137,6 +138,9 @@ def resume_medication(db: Session, med_id: int) -> Medication | None:
 
 def update_medication(db: Session, med_id: int, **fields) -> Medication | None:
     """Update medication fields (name, dose, food_rule)."""
+    invalid = set(fields) - EDITABLE_MED_FIELDS
+    if invalid:
+        raise ValueError(f"Cannot update fields: {invalid}")
     med = db.query(Medication).filter(Medication.id == med_id).first()
     if not med:
         return None

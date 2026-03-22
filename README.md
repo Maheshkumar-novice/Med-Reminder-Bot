@@ -21,9 +21,11 @@ A Telegram bot that sends medication reminders to a group chat. Admins manage me
 |---|---|
 | `/add` | Add a new medication (step-by-step) |
 | `/list` | List all medications grouped by person |
+| `/edit` | Edit an existing medication |
 | `/pause` | Temporarily pause a medication |
 | `/resume` | Resume a paused medication |
 | `/delete` | Permanently delete a medication |
+| `/today` | Show remaining reminders for today |
 
 **Persons**
 

@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 from medremind.config import settings
-from medremind.constants import FOOD_RULE_LABELS, chat_filter
+from medremind.constants import FOOD_RULE_LABELS, FOOD_RULE_OPTIONS, SUGGESTED_TIMES, chat_filter
 from medremind.crud import (
     get_active_medications,
     get_medication_with_schedules,
@@ -25,21 +25,6 @@ from medremind.database import get_db
 from medremind.scheduler import refresh_jobs
 
 CHOOSE_PERSON, CHOOSE_MED, CHOOSE_FIELD, NEW_VALUE, EDIT_TIMES, CONFIRM_TIMES, MANUAL_TIME = range(7)
-
-FOOD_RULE_OPTIONS = {
-    "before_food": "Before food",
-    "after_food": "After food",
-    "with_food": "With food",
-    "empty_stomach": "Empty stomach",
-    "any": "Any time",
-}
-
-SUGGESTED_TIMES = {
-    1: ["08:00"],
-    2: ["08:00", "20:00"],
-    3: ["08:00", "14:00", "20:00"],
-    4: ["08:00", "12:00", "16:00", "20:00"],
-}
 
 
 def _cancel_row():

@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from medremind.config import settings
 from medremind.constants import FOOD_RULE_LABELS
@@ -162,11 +162,23 @@ async def send_person_reminder(time_hhmm: str, person_name: str):
                     callback_data=snooze_data,
                 )]
             ])
-            await _bot_app.bot.send_message(
-                chat_id=settings.telegram_group_chat_id,
-                text=message,
-                reply_markup=keyboard,
-            )
+            try:
+                await _bot_app.bot.send_message(
+                    chat_id=settings.telegram_group_chat_id,
+                    text=message,
+                    reply_markup=keyboard,
+                )
+            except Exception:
+                logger.exception("Failed to send snoozed reminder for %s/%s", person_name, time_hhmm)
+                tz = pytz.timezone(settings.timezone)
+                retry_time = datetime.now(tz) + timedelta(seconds=30)
+                scheduler.add_job(
+                    send_person_reminder,
+                    trigger=DateTrigger(run_date=retry_time),
+                    args=[time_hhmm, person_name],
+                    id=f"retry_snooze_{time_hhmm.replace(':', '_')}_{person_name}",
+                    replace_existing=True,
+                )
     finally:
         db.close()
 
