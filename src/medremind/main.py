@@ -17,6 +17,7 @@ BOT_COMMANDS = [
     BotCommand("list", "List all medications"),
     BotCommand("pause", "Pause a medication"),
     BotCommand("resume", "Resume a paused medication"),
+    BotCommand("edit", "Edit an existing medication"),
     BotCommand("delete", "Delete a medication"),
     BotCommand("today", "Remaining reminders for today"),
     BotCommand("addperson", "Add a new person"),

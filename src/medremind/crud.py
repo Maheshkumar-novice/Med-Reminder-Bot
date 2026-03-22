@@ -135,6 +135,38 @@ def resume_medication(db: Session, med_id: int) -> Medication | None:
     return med
 
 
+def update_medication(db: Session, med_id: int, **fields) -> Medication | None:
+    """Update medication fields (name, dose, food_rule)."""
+    med = db.query(Medication).filter(Medication.id == med_id).first()
+    if not med:
+        return None
+    for key, value in fields.items():
+        setattr(med, key, value)
+    db.commit()
+    db.refresh(med)
+    return med
+
+
+def replace_schedules(db: Session, med_id: int, times: list[str]) -> Medication | None:
+    """Replace all schedule times for a medication."""
+    med = (
+        db.query(Medication)
+        .filter(Medication.id == med_id)
+        .options(joinedload(Medication.schedules))
+        .first()
+    )
+    if not med:
+        return None
+    for s in med.schedules:
+        db.delete(s)
+    db.flush()
+    for t in times:
+        db.add(Schedule(medication_id=med.id, time_hhmm=t, active=med.active))
+    db.commit()
+    db.refresh(med)
+    return med
+
+
 def delete_medication(db: Session, med_id: int) -> bool:
     """Permanently delete a medication and its schedules."""
     med = db.query(Medication).filter(Medication.id == med_id).first()

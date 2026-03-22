@@ -21,6 +21,7 @@ from medremind.scheduler import SNOOZE_MINUTES, format_time_12hr, schedule_snooz
 from medremind.conversation.add_med import add_conversation
 from medremind.conversation.add_person import addperson_conversation
 from medremind.conversation.delete_med import delete_conversation
+from medremind.conversation.edit_med import edit_conversation
 from medremind.conversation.pause_med import pause_conversation
 from medremind.conversation.remove_person import removeperson_conversation
 from medremind.conversation.resume_med import resume_conversation
@@ -142,6 +143,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list — List all medications\n"
         "/pause — Pause a medication\n"
         "/resume — Resume a paused medication\n"
+        "/edit — Edit an existing medication\n"
         "/delete — Permanently delete a medication\n"
         "/today — Show remaining reminders for today\n\n"
         "👥 Persons\n"
@@ -190,6 +192,7 @@ def create_bot_app(
     app.add_handler(pause_conversation)
     app.add_handler(resume_conversation)
     app.add_handler(delete_conversation)
+    app.add_handler(edit_conversation)
 
     # Simple command handlers
     app.add_handler(CommandHandler("list", cmd_list, filters=chat_filter()))
