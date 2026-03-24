@@ -12,6 +12,7 @@ from telegram.ext import (
 from medremind.constants import chat_filter
 from medremind.crud import (
     delete_medication,
+    get_medication_with_schedules,
     get_medications_for_person,
     get_persons,
 )
